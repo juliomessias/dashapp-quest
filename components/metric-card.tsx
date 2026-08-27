@@ -1,0 +1,12 @@
+import { ArrowDownRight, ArrowUpRight, Minus, Target } from 'lucide-react';
+import { compact, money } from '@/lib/demo-data';
+
+export function MetricCard({ label, value, goal, previous, format }: { label: string; value: number | null; goal: number | null; previous: number | null; format: string }) {
+  const percent = value === null || goal === null || goal === 0 ? null : value / goal * 100; const variation = value === null || previous === null || previous === 0 ? null : (value - previous) / previous * 100; const positive = (variation ?? 0) >= 0; const status = percent === null ? 'none' : percent >= 100 ? 'good' : percent >= 90 ? 'warn' : 'bad'; const display = value === null ? 'Sem dados' : format === 'currency' ? money.format(value) : compact.format(value);
+  return <article className="min-w-0 rounded-xl border border-slate-200 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,.03)] transition hover:-translate-y-0.5 hover:shadow-md">
+    <div className="flex items-start justify-between gap-2"><p className="truncate text-[11px] font-semibold uppercase tracking-[.07em] text-slate-500">{label}</p><span title="Atingimento = realizado ÷ meta proporcional" className={`h-2 w-2 shrink-0 rounded-full ${status === 'good' ? 'bg-emerald-500' : status === 'warn' ? 'bg-amber-500' : status === 'bad' ? 'bg-red-500' : 'bg-slate-300'}`} /></div>
+    <p className="mt-2 truncate text-xl font-bold tracking-[-.03em] text-slate-900">{display}</p><div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className={`h-full rounded-full ${status === 'good' ? 'bg-emerald-500' : status === 'warn' ? 'bg-amber-500' : status === 'bad' ? 'bg-red-500' : 'bg-slate-300'}`} style={{ width: `${Math.min(percent ?? 0, 100)}%` }} /></div>
+    <div className="mt-2.5 flex items-center justify-between text-[11px]"><span className="flex items-center gap-1 font-semibold text-slate-600"><Target size={12} />{percent === null ? 'N/A' : `${percent.toFixed(1).replace('.', ',')}%`}</span><span className={`flex items-center gap-0.5 font-semibold ${positive ? 'text-emerald-700' : 'text-red-600'}`}>{variation === null ? <Minus size={12} /> : positive ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}{variation === null ? 'N/A' : `${Math.abs(variation).toFixed(1).replace('.', ',')}%`}</span></div>
+    <p className="mt-1.5 truncate text-[10px] text-slate-400">Meta {goal === null ? 'não cadastrada' : format === 'currency' ? money.format(goal) : compact.format(goal)}</p>
+  </article>;
+}

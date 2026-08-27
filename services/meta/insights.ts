@@ -1,0 +1,10 @@
+import 'server-only';
+import { MetaClient } from './client';
+
+type Action = { action_type: string; value: string };
+type RawInsight = { date_start: string; date_stop: string; account_id: string; campaign_id?: string; adset_id?: string; ad_id?: string; spend?: string; impressions?: string; reach?: string; clicks?: string; actions?: Action[]; video_30_sec_watched_actions?: Action[] };
+function actionValue(actions: Action[] | undefined, actionType: string) { return Number(actions?.find((item) => item.action_type === actionType)?.value ?? 0); }
+export function normalizeInsight(row: RawInsight) { return { date: row.date_start, metaAccountId: row.account_id, campaignId: row.campaign_id ?? '', adsetId: row.adset_id ?? '', adId: row.ad_id ?? '', spend: Number(row.spend ?? 0), impressions: Number(row.impressions ?? 0), dailyReach: Number(row.reach ?? 0), engagements: actionValue(row.actions,'post_engagement'), videoViews: actionValue(row.video_30_sec_watched_actions,'video_view') || actionValue(row.actions,'video_view'), clicks: Number(row.clicks ?? 0), results: actionValue(row.actions,'offsite_conversion'), rawData: row };
+}
+export async function fetchDailyInsights(client: MetaClient, metaAccountId: string, start: string, end: string) { const rows=[]; for await (const row of client.paginate<RawInsight>(`act_${metaAccountId.replace(/^act_/,'')}/insights`, { fields:'account_id,campaign_id,adset_id,ad_id,spend,impressions,reach,clicks,actions,video_30_sec_watched_actions', level:'ad', time_increment:1, time_range:JSON.stringify({since:start,until:end}), limit:500 })) rows.push(normalizeInsight(row)); return rows; }
+export async function fetchAggregatedReach(client: MetaClient, metaAccountId: string, start: string, end: string, level='account') { const response=await client.get<{data:Array<{reach?:string}>}>(`act_${metaAccountId.replace(/^act_/,'')}/insights`,{fields:'reach',level,time_range:JSON.stringify({since:start,until:end}),limit:1}); return Number(response.data[0]?.reach??0); }

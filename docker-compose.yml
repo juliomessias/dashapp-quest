@@ -1,0 +1,38 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: meta_bi
+      POSTGRES_USER: meta_bi
+      POSTGRES_PASSWORD: meta_bi
+      TZ: America/Sao_Paulo
+    ports:
+      - "5432:5432"
+    volumes:
+      - meta_bi_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U meta_bi -d meta_bi"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://meta_bi:meta_bi@db:5432/meta_bi
+      AUTH_SECRET: ${AUTH_SECRET:-dev-only-change-before-production}
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
+      DEMO_MODE: ${DEMO_MODE:-false}
+      META_APP_ID: ${META_APP_ID:-}
+      META_APP_SECRET: ${META_APP_SECRET:-}
+      META_REDIRECT_URI: ${META_REDIRECT_URI:-}
+      META_GRAPH_API_VERSION: ${META_GRAPH_API_VERSION:-v25.0}
+      META_TOKEN_ENCRYPTION_KEY: ${META_TOKEN_ENCRYPTION_KEY:-}
+      CRON_SECRET: ${CRON_SECRET:-dev-cron-change-before-production}
+      TZ: America/Sao_Paulo
+    ports:
+      - "3000:3000"
+volumes:
+  meta_bi_pgdata:

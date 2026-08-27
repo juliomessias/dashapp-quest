@@ -1,0 +1,11 @@
+'use client';
+import { signIn } from 'next-auth/react';
+import { useRouter } from 'next/navigation';
+import { useState } from 'react';
+import { Eye, EyeOff, Loader2, LockKeyhole } from 'lucide-react';
+
+export function LoginForm() {
+  const router = useRouter(); const [email, setEmail] = useState(''); const [password, setPassword] = useState(''); const [show, setShow] = useState(false); const [loading, setLoading] = useState(false); const [error, setError] = useState('');
+  async function submit(event: React.FormEvent) { event.preventDefault(); setLoading(true); setError(''); const result = await signIn('credentials', { email, password, redirect: false }); setLoading(false); if (result?.error) setError('E-mail ou senha inválidos.'); else { router.push('/'); router.refresh(); } }
+  return <form onSubmit={submit} className="mt-7 space-y-4"><div><label className="mb-1.5 block text-xs font-semibold text-slate-700" htmlFor="email">E-mail</label><input id="email" name="email" autoComplete="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="h-11 w-full rounded-lg border border-slate-200 px-3 text-sm focus:border-orange-400" required /></div><div><label className="mb-1.5 block text-xs font-semibold text-slate-700" htmlFor="password">Senha</label><div className="relative"><input id="password" name="password" autoComplete="current-password" type={show ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} className="h-11 w-full rounded-lg border border-slate-200 px-3 pr-10 text-sm focus:border-orange-400" required /><button type="button" onClick={() => setShow(!show)} className="absolute right-3 top-3 text-slate-400" aria-label={show ? 'Ocultar senha' : 'Mostrar senha'}>{show ? <EyeOff size={18} /> : <Eye size={18} />}</button></div></div>{error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-xs font-medium text-red-700">{error}</p>}<button disabled={loading} className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-orange-600 text-sm font-bold text-white hover:bg-orange-700 disabled:opacity-70">{loading ? <Loader2 className="animate-spin" size={17} /> : <LockKeyhole size={17} />}Entrar</button></form>;
+}

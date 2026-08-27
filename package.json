@@ -1,0 +1,56 @@
+{
+  "name": "dashboard-meta-ads",
+  "version": "1.0.0",
+  "private": true,
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "packageManager": "pnpm@11.19.0",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint . --ignore-pattern .next --ignore-pattern coverage --ignore-pattern playwright-report",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run tests/unit --environment node --exclude **/.next/**",
+    "test:watch": "vitest tests/unit --environment node --exclude **/.next/**",
+    "test:e2e": "playwright test",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:seed": "node --require ./scripts/tsx-windows-compat.cjs --conditions=react-server --import tsx db/seed.ts",
+    "admin:create": "node --require ./scripts/tsx-windows-compat.cjs --conditions=react-server --import tsx db/create-admin.ts",
+    "sync:meta": "node --require ./scripts/tsx-windows-compat.cjs --conditions=react-server --import tsx jobs/sync-meta.ts",
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "0.5.7",
+    "@tanstack/react-table": "8.21.3",
+    "argon2": "0.44.0",
+    "drizzle-orm": "0.44.5",
+    "lucide-react": "0.468.0",
+    "next": "16.2.6",
+    "next-auth": "4.24.11",
+    "pg": "8.16.3",
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
+    "recharts": "3.1.2",
+    "server-only": "0.0.1",
+    "zod": "4.1.5"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.55.0",
+    "@tailwindcss/postcss": "4.2.1",
+    "@types/node": "22.19.19",
+    "@types/pg": "8.15.5",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "drizzle-kit": "0.31.4",
+    "eslint": "9.39.4",
+    "eslint-config-next": "16.2.6",
+    "tailwindcss": "4.2.1",
+    "tsx": "4.20.5",
+    "typescript": "5.9.3",
+    "vitest": "3.2.4"
+  },
+  "type": "module"
+}

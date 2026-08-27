@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "meta_connections_business_uidx" ON "meta_connections" USING btree ("business_id") WHERE "meta_connections"."business_id" is not null;

@@ -1,0 +1,75 @@
+import { argon2id, hash } from 'argon2';
+import { and, desc, eq, isNull } from 'drizzle-orm';
+import { revalidatePath } from 'next/cache';
+import { adAccounts, analysts, auditLogs, brands, metricGoals, monthlyBudgets, users } from '@/db/schema';
+import { accountInputSchema, analystInputSchema, brandInputSchema, budgetInputSchema, goalInputSchema, userInputSchema } from '@/lib/admin-validation';
+import { getDb } from '@/lib/db'; import { requireAdminActor } from '@/lib/server-auth';
+
+type Resource = 'catalog' | 'brands' | 'analysts' | 'accounts' | 'users' | 'goals' | 'budgets' | 'logs';
+type RouteContext = { params: Promise<{ resource: string }> };
+const resources = new Set<Resource>(['catalog','brands','analysts','accounts','users','goals','budgets','logs']);
+function asResource(value:string):Resource|null { return resources.has(value as Resource) ? value as Resource : null; }
+function statusForError(error: unknown) { const code = typeof error === 'object' && error && 'code' in error ? String(error.code) : ''; return code === '23505' ? 409 : code === '23503' ? 409 : 400; }
+function messageForError(error: unknown) { const code = typeof error === 'object' && error && 'code' in error ? String(error.code) : ''; if (code === '23505') return 'Já existe um registro com essa combinação.'; if (code === '23503') return 'O registro está em uso e não pode ser excluído.'; return error instanceof Error ? error.message : 'Não foi possível concluir a operação.'; }
+async function actorOrResponse() { try { return await requireAdminActor(); } catch { return Response.json({ error: 'Apenas administradores podem alterar estes dados.' }, { status: 403 }); } }
+
+export async function GET(_: Request, context: RouteContext) {
+  const actor = await actorOrResponse(); if (actor instanceof Response) return actor; const raw = (await context.params).resource; const resource=asResource(raw); if(!resource)return Response.json({error:'Recurso não encontrado.'},{status:404}); const db = await getDb();
+  if (resource === 'catalog') {
+    const [accountRows, brandRows, analystRows, userRows] = await Promise.all([
+      db.select({ id: adAccounts.id, metaAccountId: adAccounts.metaAccountId, name: adAccounts.name, brandId: adAccounts.brandId, brand: brands.name, market: adAccounts.market, analystId: adAccounts.analystId, analyst: analysts.name, currency: adAccounts.currency, timezone: adAccounts.timezone, facebookPageId: adAccounts.facebookPageId, instagramProfileId: adAccounts.instagramProfileId, status: adAccounts.status }).from(adAccounts).innerJoin(brands, eq(adAccounts.brandId, brands.id)).leftJoin(analysts, eq(adAccounts.analystId, analysts.id)).orderBy(adAccounts.name),
+      db.select().from(brands).orderBy(brands.name), db.select().from(analysts).orderBy(analysts.name), db.select({ id: users.id, name: users.name, email: users.email, role: users.role, active: users.active, createdAt: users.createdAt }).from(users).orderBy(users.name),
+    ]); return Response.json({ accounts: accountRows, brands: brandRows, analysts: analystRows, users: userRows });
+  }
+  if (resource === 'goals') return Response.json({ items: await db.select({ id: metricGoals.id, year: metricGoals.year, month: metricGoals.month, accountId: metricGoals.accountId, account: adAccounts.name, brandId: metricGoals.brandId, brand: brands.name, metricKey: metricGoals.metricKey, value: metricGoals.value, note: metricGoals.note, source: metricGoals.source, changedAt: metricGoals.changedAt, changedBy: users.name }).from(metricGoals).leftJoin(adAccounts, eq(metricGoals.accountId, adAccounts.id)).leftJoin(brands, eq(metricGoals.brandId, brands.id)).leftJoin(users, eq(metricGoals.changedByUserId, users.id)).orderBy(desc(metricGoals.changedAt)) });
+  if (resource === 'budgets') return Response.json({ items: await db.select({ id: monthlyBudgets.id, accountId: monthlyBudgets.accountId, account: adAccounts.name, brandId: adAccounts.brandId, brand: brands.name, year: monthlyBudgets.year, month: monthlyBudgets.month, budget: monthlyBudgets.budget, prepaidBalance: monthlyBudgets.prepaidBalance, note: monthlyBudgets.note, source: monthlyBudgets.source, changedAt: monthlyBudgets.changedAt, changedBy: users.name }).from(monthlyBudgets).innerJoin(adAccounts, eq(monthlyBudgets.accountId, adAccounts.id)).innerJoin(brands, eq(adAccounts.brandId, brands.id)).leftJoin(users, eq(monthlyBudgets.changedByUserId, users.id)).orderBy(desc(monthlyBudgets.changedAt)) });
+  if (resource === 'logs') return Response.json({ items: await db.select({ id: auditLogs.id, action: auditLogs.action, entity: auditLogs.entity, beforeValues: auditLogs.beforeValues, afterValues: auditLogs.afterValues, createdAt: auditLogs.createdAt, user: users.name }).from(auditLogs).leftJoin(users, eq(auditLogs.userId, users.id)).orderBy(desc(auditLogs.createdAt)).limit(100) });
+  return Response.json({ error: 'Recurso não encontrado.' }, { status: 404 });
+}
+
+export async function POST(request: Request, context: RouteContext) {
+  const actor = await actorOrResponse(); if (actor instanceof Response) return actor; const raw=(await context.params).resource;const resource=asResource(raw);if(!resource)return Response.json({error:'Recurso não encontrado.'},{status:404}); const body = await request.json(); const db = await getDb();
+  try {
+    let saved: unknown;let auditAction=`${resource}.create`;
+    await db.transaction(async (tx) => {
+      if (resource === 'brands') { const value = brandInputSchema.parse(body); [saved] = await tx.insert(brands).values(value).returning(); }
+      else if (resource === 'analysts') { const value = analystInputSchema.parse(body); [saved] = await tx.insert(analysts).values(value).returning(); }
+      else if (resource === 'accounts') { const value = accountInputSchema.parse(body); [saved] = await tx.insert(adAccounts).values(value).returning(); }
+      else if (resource === 'users') { const value = userInputSchema.parse(body); [saved] = await tx.insert(users).values({ name: value.name, email: value.email, passwordHash: await hash(value.password!, { type: argon2id, memoryCost: 19456, timeCost: 2, parallelism: 1 }), role: value.role, active: value.active }).returning({ id: users.id, name: users.name, email: users.email, role: users.role, active: users.active }); }
+      else if (resource === 'goals') {
+        const value = goalInputSchema.parse(body); const month = value.type === 'annual' ? null : value.month!; const accountId = value.scope === 'account' ? value.accountId! : null; const brandId = value.scope === 'brand' ? value.brandId! : null;
+        const conditions = [eq(metricGoals.year, value.year), eq(metricGoals.metricKey, value.metricKey), month === null ? isNull(metricGoals.month) : eq(metricGoals.month, month), accountId ? eq(metricGoals.accountId, accountId) : isNull(metricGoals.accountId), brandId ? eq(metricGoals.brandId, brandId) : isNull(metricGoals.brandId)];
+        const [existing] = await tx.select().from(metricGoals).where(and(...conditions)).limit(1); if (existing && !value.replace) throw new Error(`DUPLICATE:${existing.id}`);
+        if (existing){auditAction='goals.update';[saved] = await tx.update(metricGoals).set({ value: String(value.value), note: value.note || null, source: 'manual', changedByUserId: actor.id, changedAt: new Date() }).where(eq(metricGoals.id, existing.id)).returning();}
+        else [saved] = await tx.insert(metricGoals).values({ year: value.year, month, accountId, brandId, metricKey: value.metricKey, value: String(value.value), note: value.note || null, source: 'manual', changedByUserId: actor.id }).returning();
+      } else if (resource === 'budgets') {
+        const value = budgetInputSchema.parse(body); const [existing] = await tx.select().from(monthlyBudgets).where(and(eq(monthlyBudgets.accountId, value.accountId), eq(monthlyBudgets.year, value.year), eq(monthlyBudgets.month, value.month))).limit(1); if (existing && !value.replace) throw new Error(`DUPLICATE:${existing.id}`);
+        const values = { budget: String(value.budget), prepaidBalance: value.prepaidBalance === null ? null : String(value.prepaidBalance), note: value.note || null, source: 'manual', changedByUserId: actor.id, changedAt: new Date() };
+        if (existing){auditAction='budgets.update';[saved] = await tx.update(monthlyBudgets).set(values).where(eq(monthlyBudgets.id, existing.id)).returning();} else [saved] = await tx.insert(monthlyBudgets).values({ accountId: value.accountId, year: value.year, month: value.month, ...values }).returning();
+      } else throw new Error('Recurso não encontrado.');
+      await tx.insert(auditLogs).values({ userId: actor.id, action: auditAction, entity: resource, afterValues: saved as Record<string, unknown> });
+    });
+    revalidatePath('/', 'layout'); return Response.json({ item: saved }, { status: 201 });
+  } catch (error) { const message = messageForError(error); if (message.startsWith('DUPLICATE:')) return Response.json({ error: 'Já existe um registro com essa combinação.', duplicateId: message.split(':')[1] }, { status: 409 }); return Response.json({ error: message }, { status: statusForError(error) }); }
+}
+
+export async function PATCH(request: Request, context: RouteContext) {
+  const actor = await actorOrResponse(); if (actor instanceof Response) return actor; const raw=(await context.params).resource;const resource=asResource(raw);if(!resource)return Response.json({error:'Recurso não encontrado.'},{status:404}); const body = await request.json(); const db = await getDb();
+  try {
+    let before: unknown; let saved: unknown; const id = String(body.id ?? ''); if (!id) throw new Error('Identificador obrigatório.');
+    await db.transaction(async (tx) => {
+      if (resource === 'brands') { const value = brandInputSchema.parse(body); [before] = await tx.select().from(brands).where(eq(brands.id,id)); [saved] = await tx.update(brands).set({ name:value.name,code:value.code,active:value.active }).where(eq(brands.id,id)).returning(); }
+      else if (resource === 'analysts') { const value = analystInputSchema.parse(body); [before] = await tx.select().from(analysts).where(eq(analysts.id,id)); [saved] = await tx.update(analysts).set({ name:value.name,email:value.email,active:value.active }).where(eq(analysts.id,id)).returning(); }
+      else if (resource === 'accounts') { const value = accountInputSchema.parse(body); [before] = await tx.select().from(adAccounts).where(eq(adAccounts.id,id)); [saved] = await tx.update(adAccounts).set({ metaAccountId:value.metaAccountId,name:value.name,brandId:value.brandId,market:value.market,analystId:value.analystId??null,facebookPageId:value.facebookPageId||null,instagramProfileId:value.instagramProfileId||null,currency:value.currency,timezone:value.timezone,status:value.status }).where(eq(adAccounts.id,id)).returning(); }
+      else if (resource === 'users') { const value = userInputSchema.parse(body); [before] = await tx.select({id:users.id,name:users.name,email:users.email,role:users.role,active:users.active}).from(users).where(eq(users.id,id)); const changes: Partial<typeof users.$inferInsert>={name:value.name,email:value.email,role:value.role,active:value.active}; if(value.password)changes.passwordHash=await hash(value.password,{type:argon2id,memoryCost:19456,timeCost:2,parallelism:1}); [saved]=await tx.update(users).set(changes).where(eq(users.id,id)).returning({id:users.id,name:users.name,email:users.email,role:users.role,active:users.active}); }
+      else if (resource === 'goals') { const value=goalInputSchema.parse(body); [before]=await tx.select().from(metricGoals).where(eq(metricGoals.id,id)); const accountId=value.scope==='account'?value.accountId!:null;const brandId=value.scope==='brand'?value.brandId!:null;[saved]=await tx.update(metricGoals).set({year:value.year,month:value.type==='annual'?null:value.month!,accountId,brandId,metricKey:value.metricKey,value:String(value.value),note:value.note||null,source:'manual',changedByUserId:actor.id,changedAt:new Date()}).where(eq(metricGoals.id,id)).returning(); }
+      else if(resource==='budgets'){const value=budgetInputSchema.parse(body);[before]=await tx.select().from(monthlyBudgets).where(eq(monthlyBudgets.id,id));[saved]=await tx.update(monthlyBudgets).set({accountId:value.accountId,year:value.year,month:value.month,budget:String(value.budget),prepaidBalance:value.prepaidBalance===null?null:String(value.prepaidBalance),note:value.note||null,source:'manual',changedByUserId:actor.id,changedAt:new Date()}).where(eq(monthlyBudgets.id,id)).returning();}
+      else throw new Error('Recurso não encontrado.'); if(!saved)throw new Error('Registro não encontrado.'); await tx.insert(auditLogs).values({userId:actor.id,action:`${resource}.update`,entity:resource,beforeValues:before as Record<string,unknown>,afterValues:saved as Record<string,unknown>});
+    }); revalidatePath('/','layout'); return Response.json({item:saved});
+  } catch(error){return Response.json({error:messageForError(error)},{status:statusForError(error)});}
+}
+
+export async function DELETE(request: Request, context: RouteContext) {
+  const actor=await actorOrResponse();if(actor instanceof Response)return actor;const raw=(await context.params).resource;const resource=asResource(raw);if(!resource)return Response.json({error:'Recurso não encontrado.'},{status:404});const id=new URL(request.url).searchParams.get('id');if(!id)return Response.json({error:'Identificador obrigatório.'},{status:400});const db=await getDb();
+  try{let before:unknown;await db.transaction(async(tx)=>{if(resource==='accounts'){[before]=await tx.select().from(adAccounts).where(eq(adAccounts.id,id));await tx.update(adAccounts).set({status:'archived'}).where(eq(adAccounts.id,id));}else if(resource==='brands'){[before]=await tx.select().from(brands).where(eq(brands.id,id));await tx.delete(brands).where(eq(brands.id,id));}else if(resource==='analysts'){[before]=await tx.select().from(analysts).where(eq(analysts.id,id));await tx.delete(analysts).where(eq(analysts.id,id));}else if(resource==='users'){if(id===actor.id)throw new Error('Você não pode desativar seu próprio usuário.');[before]=await tx.select({id:users.id,name:users.name,email:users.email,role:users.role,active:users.active}).from(users).where(eq(users.id,id));await tx.update(users).set({active:false}).where(eq(users.id,id));}else if(resource==='goals'){[before]=await tx.select().from(metricGoals).where(eq(metricGoals.id,id));await tx.delete(metricGoals).where(eq(metricGoals.id,id));}else if(resource==='budgets'){[before]=await tx.select().from(monthlyBudgets).where(eq(monthlyBudgets.id,id));await tx.delete(monthlyBudgets).where(eq(monthlyBudgets.id,id));}else throw new Error('Recurso não encontrado.');await tx.insert(auditLogs).values({userId:actor.id,action:`${resource}.delete`,entity:resource,beforeValues:before as Record<string,unknown>});});revalidatePath('/','layout');return Response.json({ok:true});}catch(error){return Response.json({error:messageForError(error)},{status:statusForError(error)});}
+}

@@ -1,0 +1,1 @@
+export async function preserveLastValidOnFailure<T>(current:T,operation:()=>Promise<T>){try{return {data:await operation(),status:'success' as const,error:null};}catch(error){return {data:current,status:'failed' as const,error:error instanceof Error?error.message:'Erro desconhecido'};}}

@@ -1,0 +1,11 @@
+import { z } from 'zod';
+
+export const importHeaders = ['ano','mes','meta_account_id','conta','marca','pais','analista','meta_alcance','meta_impressoes','meta_engajamento','meta_video','meta_curtidores','meta_seguidores','orcamento_mensal'] as const;
+export const importRowSchema = z.object({ ano: z.coerce.number().int().min(2020), mes: z.coerce.number().int().min(1).max(12), meta_account_id: z.string().min(1), conta: z.string().min(1), marca: z.string().min(1), pais: z.string().min(1), analista: z.string().min(1), meta_alcance: z.coerce.number().nonnegative(), meta_impressoes: z.coerce.number().nonnegative(), meta_engajamento: z.coerce.number().nonnegative(), meta_video: z.coerce.number().nonnegative(), meta_curtidores: z.coerce.number(), meta_seguidores: z.coerce.number(), orcamento_mensal: z.coerce.number().nonnegative() });
+export type ImportRow = z.infer<typeof importRowSchema>;
+
+function splitLine(line: string) { const out: string[] = []; let current = ''; let quoted = false; for (let i = 0; i < line.length; i += 1) { const char = line[i]; if (char === '"' && line[i + 1] === '"' && quoted) { current += '"'; i += 1; } else if (char === '"') quoted = !quoted; else if (char === ',' && !quoted) { out.push(current.trim()); current = ''; } else current += char; } out.push(current.trim()); return out; }
+export function parseImportCsv(content: string): ImportRow[] {
+  const lines = content.replace(/^\ufeff/, '').split(/\r?\n/).filter(Boolean); if (lines.length < 2) throw new Error('CSV vazio.'); const headers = splitLine(lines[0]); const missing = importHeaders.filter((header) => !headers.includes(header)); if (missing.length) throw new Error(`Colunas ausentes: ${missing.join(', ')}`);
+  return lines.slice(1).map((line, index) => { const cells = splitLine(line); const record = Object.fromEntries(headers.map((header, cellIndex) => [header, cells[cellIndex] ?? ''])); const parsed = importRowSchema.safeParse(record); if (!parsed.success) throw new Error(`Linha ${index + 2} inválida: ${parsed.error.issues[0]?.message}`); if (parsed.data.mes > 10 && [parsed.data.meta_alcance,parsed.data.meta_impressoes,parsed.data.meta_engajamento,parsed.data.meta_video].some((v) => v !== 0)) throw new Error(`Linha ${index + 2}: novembro e dezembro não podem receber metas.`); return parsed.data; });
+}
